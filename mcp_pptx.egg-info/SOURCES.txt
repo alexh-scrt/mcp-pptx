@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+mcp_pptx.egg-info/PKG-INFO
+mcp_pptx.egg-info/SOURCES.txt
+mcp_pptx.egg-info/dependency_links.txt
+mcp_pptx.egg-info/requires.txt
+mcp_pptx.egg-info/top_level.txt
+src/mcp_pptx/__init__.py
+src/mcp_pptx/__main__.py
+src/mcp_pptx/server.py
+tests/test_models.py

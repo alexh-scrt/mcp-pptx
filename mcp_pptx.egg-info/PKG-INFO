@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: mcp-pptx
+Version: 0.1.0
+Summary: MCP server for PowerPoint presentation generation with web theme extraction
+Author-email: Claude <claude@anthropic.com>
+Requires-Python: >=3.9
+Requires-Dist: mcp>=1.0.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: playwright>=1.40.0
+Requires-Dist: python-pptx>=0.6.22
+Requires-Dist: httpx>=0.25.0
+Requires-Dist: pillow>=10.0.0
+Requires-Dist: beautifulsoup4>=4.12.0
+Requires-Dist: cssselect>=1.2.0
+Requires-Dist: colorthief>=0.2.1
+Requires-Dist: aiofiles>=23.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: isort>=5.12.0; extra == "dev"
+Requires-Dist: mypy>=1.5.0; extra == "dev"

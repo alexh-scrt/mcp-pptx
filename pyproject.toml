@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-pptx"
+version = "0.1.0"
+description = "MCP server for PowerPoint presentation generation with web theme extraction"
+authors = [{name = "Claude", email = "claude@anthropic.com"}]
+requires-python = ">=3.9"
+dependencies = [
+    "mcp>=1.0.0",
+    "pydantic>=2.0.0",
+    "playwright>=1.40.0",
+    "python-pptx>=0.6.22",
+    "httpx>=0.25.0",
+    "pillow>=10.0.0",
+    "beautifulsoup4>=4.12.0",
+    "cssselect>=1.2.0",
+    "colorthief>=0.2.1",
+    "aiofiles>=23.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.5.0",
+]
+
+[tool.setuptools]
+packages = ["src.mcp_pptx"]
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

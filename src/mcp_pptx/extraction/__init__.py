@@ -1,0 +1,1 @@
+"""Web theme extraction module."""

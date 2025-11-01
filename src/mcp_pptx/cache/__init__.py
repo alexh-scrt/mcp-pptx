@@ -1,0 +1,1 @@
+"""Asset caching module."""
