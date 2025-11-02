@@ -51,38 +51,47 @@ class ThemeExtractor:
     ) -> ScrapedTheme:
         """Extract theme from a website."""
         warnings: List[str] = []
-        
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            try:
-                page = await browser.new_page()
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-                
-                # Extract colors
-                colors = await self._extract_colors(page)
-                
-                # Extract fonts
-                fonts = await self._extract_fonts(page)
-                
-                # Extract logo if requested
-                logo = None
-                if extract_logo:
-                    try:
-                        logo = await self._extract_logo(page, url, selector_hints)
-                    except Exception as e:
-                        logger.warning(f"Logo extraction failed: {e}")
-                        warnings.append(f"Could not extract logo: {str(e)}")
-                
-                return ScrapedTheme(
-                    colors=colors,
-                    fonts=fonts,
-                    logo=logo,
-                    source_url=url,
-                    warnings=warnings
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=['--disable-dev-shm-usage', '--no-sandbox']
                 )
-                
-            finally:
-                await browser.close()
+                try:
+                    page = await browser.new_page()
+                    await page.goto(url, wait_until="networkidle", timeout=30000)
+
+                    # Extract colors
+                    colors = await self._extract_colors(page)
+
+                    # Extract fonts
+                    fonts = await self._extract_fonts(page)
+
+                    # Extract logo if requested
+                    logo = None
+                    if extract_logo:
+                        try:
+                            logo = await self._extract_logo(page, url, selector_hints)
+                        except Exception as e:
+                            logger.warning(f"Logo extraction failed: {e}")
+                            warnings.append(f"Could not extract logo: {str(e)}")
+
+                    return ScrapedTheme(
+                        colors=colors,
+                        fonts=fonts,
+                        logo=logo,
+                        source_url=url,
+                        warnings=warnings
+                    )
+
+                finally:
+                    await browser.close()
+        except Exception as e:
+            logger.error(f"Playwright extraction failed: {e}")
+            logger.info("Falling back to simple HTTP extraction")
+            warnings.append(f"Playwright not available, using fallback method: {str(e)}")
+            return await self._extract_theme_fallback(url, warnings)
 
     async def _extract_colors(self, page: Page) -> ColorPalette:
         """Extract color palette from page."""
@@ -367,21 +376,174 @@ class ThemeExtractor:
         
         return 'Arial'
 
+    async def _extract_theme_fallback(self, url: str, warnings: List[str]) -> ScrapedTheme:
+        """Fallback theme extraction using simple HTTP requests."""
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                html_content = response.text
+
+            # Use BeautifulSoup for basic parsing
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            # Extract basic colors from inline styles and style tags
+            colors = self._extract_colors_from_html(soup)
+
+            # Extract basic fonts
+            fonts = self._extract_fonts_from_html(soup)
+
+            # Try to find logo
+            logo = None
+            try:
+                logo = await self._extract_logo_from_html(soup, url)
+            except Exception as e:
+                logger.warning(f"Logo extraction in fallback failed: {e}")
+                warnings.append(f"Could not extract logo: {str(e)}")
+
+            warnings.append("Note: Fallback extraction may not be as accurate as Playwright-based extraction")
+
+            return ScrapedTheme(
+                colors=colors,
+                fonts=fonts,
+                logo=logo,
+                source_url=url,
+                warnings=warnings
+            )
+        except Exception as e:
+            logger.error(f"Fallback extraction also failed: {e}")
+            warnings.append(f"Fallback extraction failed: {str(e)}")
+            # Return default theme
+            return ScrapedTheme(
+                colors=ColorPalette(
+                    primary='#005596',
+                    secondary='#0A77C0',
+                    accent='#FF5733',
+                    background='#FFFFFF',
+                    text='#333333'
+                ),
+                fonts=FontPalette(
+                    heading='Calibri',
+                    body='Arial'
+                ),
+                logo=None,
+                source_url=url,
+                warnings=warnings + ["Using default theme colors and fonts"]
+            )
+
+    def _extract_colors_from_html(self, soup) -> ColorPalette:
+        """Extract colors from HTML without JavaScript execution."""
+        # Default colors
+        colors = {
+            'primary': '#005596',
+            'secondary': '#0A77C0',
+            'accent': '#FF5733',
+            'background': '#FFFFFF',
+            'text': '#333333'
+        }
+
+        # Try to find colors in style attributes and style tags
+        style_tags = soup.find_all('style')
+        for style_tag in style_tags:
+            if style_tag.string:
+                # Look for common color patterns
+                import re
+                color_pattern = r'#[0-9A-Fa-f]{6}|rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)'
+                found_colors = re.findall(color_pattern, style_tag.string)
+                if found_colors and len(found_colors) > 0:
+                    colors['primary'] = self._parse_color(found_colors[0])
+                if len(found_colors) > 1:
+                    colors['secondary'] = self._parse_color(found_colors[1])
+
+        return ColorPalette(**colors)
+
+    def _extract_fonts_from_html(self, soup) -> FontPalette:
+        """Extract fonts from HTML without JavaScript execution."""
+        # Default fonts
+        heading_font = 'Calibri'
+        body_font = 'Arial'
+
+        # Try to find fonts in style tags
+        style_tags = soup.find_all('style')
+        for style_tag in style_tags:
+            if style_tag.string and 'font-family' in style_tag.string:
+                import re
+                font_pattern = r'font-family:\s*([^;}\n]+)'
+                fonts_found = re.findall(font_pattern, style_tag.string)
+                if fonts_found:
+                    first_font = self._extract_font_name(fonts_found[0])
+                    heading_font = self.FONT_MAPPINGS.get(first_font, 'Calibri')
+                    if len(fonts_found) > 1:
+                        second_font = self._extract_font_name(fonts_found[1])
+                        body_font = self.FONT_MAPPINGS.get(second_font, 'Arial')
+                    break
+
+        return FontPalette(
+            heading=heading_font,
+            body=body_font
+        )
+
+    async def _extract_logo_from_html(self, soup, base_url: str) -> Optional[LogoSpec]:
+        """Extract logo from HTML without JavaScript execution."""
+        # Common logo selectors
+        logo_img = None
+
+        # Try to find logo by common patterns
+        for selector in ['img[alt*="logo" i]', 'img[class*="logo"]', 'header img', 'nav img']:
+            elements = soup.select(selector)
+            if elements:
+                logo_img = elements[0]
+                break
+
+        if not logo_img:
+            return None
+
+        src = logo_img.get('src')
+        if not src:
+            return None
+
+        # Convert relative URL to absolute
+        logo_url = urljoin(base_url, src)
+
+        # Download and cache logo
+        try:
+            cached_path = await self.asset_cache.download_image(logo_url)
+
+            # Try to get dimensions from attributes
+            width = logo_img.get('width')
+            height = logo_img.get('height')
+            if width:
+                width = int(width) if str(width).isdigit() else None
+            if height:
+                height = int(height) if str(height).isdigit() else None
+
+            return LogoSpec(
+                url=logo_url,
+                cached_path=str(cached_path) if cached_path else None,
+                width=width,
+                height=height,
+                alt_text=logo_img.get('alt')
+            )
+        except Exception as e:
+            logger.warning(f"Failed to download logo: {e}")
+            return None
+
     def merge_themes(self, themes: List[ScrapedTheme], priority: str = "balanced") -> ScrapedTheme:
         """Merge multiple themes into one."""
         if not themes:
             raise ValueError("No themes provided")
-        
+
         if len(themes) == 1:
             return themes[0]
-        
+
         if priority == "first":
             base_theme = themes[0]
             # Use first theme's colors and fonts, but merge warnings
             warnings = []
             for theme in themes:
                 warnings.extend(theme.warnings)
-            
+
             return ScrapedTheme(
                 colors=base_theme.colors,
                 fonts=base_theme.fonts,
@@ -389,18 +551,18 @@ class ThemeExtractor:
                 source_url=base_theme.source_url,
                 warnings=warnings
             )
-        
+
         # Balanced approach - use most common colors/fonts
         # For simplicity, use first theme but could implement voting
         base_theme = themes[0]
         all_warnings = []
         for theme in themes:
             all_warnings.extend(theme.warnings)
-        
+
         return ScrapedTheme(
             colors=base_theme.colors,
             fonts=base_theme.fonts,
             logo=base_theme.logo,
-            source_url=f"merged:{','.join(t.source_url for t in themes)}",
+            source_url=f"merged:{','.join(str(t.source_url) for t in themes)}",
             warnings=all_warnings
         )

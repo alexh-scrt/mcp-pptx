@@ -1,68 +1,105 @@
+# MCP-PPTX Server Summary (v1.1)
 
 ## High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│          MCP Server: PowerPoint Generator               │
-├─────────────────────────────────────────────────────────┤
-│                                                           │
-│  ┌─────────────┐      ┌──────────────┐                 │
-│  │   Tools     │      │  Resources   │                 │
-│  │             │      │              │                 │
-│  │ • create_   │      │ • List       │                 │
-│  │   pptx      │      │   available  │                 │
-│  │ • scrape_   │      │   templates  │                 │
-│  │   theme     │      │ • Theme      │                 │
-│  │ • preview_  │      │   schemas    │                 │
-│  │   theme     │      │              │                 │
-│  └─────────────┘      └──────────────┘                 │
-│                                                           │
-│  ┌──────────────────────────────────────────┐           │
-│  │         Core Components                   │           │
-│  ├──────────────────────────────────────────┤           │
-│  │ • Web Scraper (BeautifulSoup/Playwright) │           │
-│  │ • Theme Extractor (colors, fonts, imgs)  │           │
-│  │ • PPTX Builder (python-pptx)             │           │
-│  │ • Image Processor (PIL/Pillow)           │           │
-│  │ • Layout Engine (slide templates)        │           │
-│  └──────────────────────────────────────────┘           │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│            MCP Server: PowerPoint Generator v1.1                  │
+├───────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌─────────────────┐      ┌────────────────────────┐             │
+│  │   MCP Tools     │      │  Resources             │             │
+│  │                 │      │                        │             │
+│  │ • scrape_theme  │      │ • Default Secret AI    │             │
+│  │ • list_templates│      │   theme (Red/Cyan)     │             │
+│  │ • validate_deck │      │ • PowerPoint templates │             │
+│  │ • generate_     │      │ • Theme schemas        │             │
+│  │   presentation  │      │ • Layout definitions   │             │
+│  │ • merge_themes  │      │                        │             │
+│  └─────────────────┘      └────────────────────────┘             │
+│                                                                     │
+│  ┌───────────────────────────────────────────────────┐            │
+│  │         Core Components                            │            │
+│  ├───────────────────────────────────────────────────┤            │
+│  │ • Web Scraper (Playwright + HTTP fallback)        │            │
+│  │ • Theme Extractor (colors, fonts, logos)          │            │
+│  │ • Default Theme Loader (Secret AI branding)       │            │
+│  │ • PPTX Builder (python-pptx)                      │            │
+│  │ • Smart Bullet Formatter (colon & dash rules)     │            │
+│  │ • CODE Slide Renderer (monospace + auto-split)    │            │
+│  │ • Layout Engine (9 layouts + theme applicator)    │            │
+│  │ • Asset Cache (24-hour TTL)                       │            │
+│  └───────────────────────────────────────────────────┘            │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Design Components
 
 ### 1. **MCP Tools** (Functions Claude can call)
 
-**Tool 1: `scrape_theme_from_url`**
-- **Input**: URL, optional selectors/hints
-- **Output**: Theme object (colors, fonts, images, layout style)
-- **Purpose**: Extract visual design elements from a webpage
+**Tool 1: `scrape_theme`**
+- **Input**: URL, optional selectors, max images
+- **Output**: Theme object (colors, fonts, logos, images)
+- **Purpose**: Extract visual design elements from any webpage
+- **Implementation**: Playwright with HTTP fallback
 
-**Tool 2: `create_presentation`**
-- **Input**: 
-  - Content structure (JSON/dict with slides)
-  - Theme data (from scraping or manual)
-  - Options (layout preferences, image placement)
-- **Output**: File path to generated .pptx
-- **Purpose**: Generate the actual PowerPoint file
+**Tool 2: `generate_presentation`**
+- **Input**: DeckSpec (content structure, theme, slides, output config)
+- **Output**: File path to generated .pptx and generation stats
+- **Purpose**: Generate PowerPoint from comprehensive deck specification
+- **Features**: 9 layouts, smart bullet formatting, CODE slides, auto-splitting
 
-**Tool 3: `preview_theme`** (optional but useful)
-- **Input**: Theme data
-- **Output**: Sample slide preview or theme summary
-- **Purpose**: Let Claude verify theme before creating full presentation
+**Tool 3: `list_templates`**
+- **Input**: None
+- **Output**: Available theme templates and their metadata
+- **Purpose**: List pre-configured themes (including default Secret AI theme)
 
-### 2. **Theme Extraction Strategy**
+**Tool 4: `validate_deck_spec`**
+- **Input**: DeckSpec JSON
+- **Output**: Validation results with detailed error messages
+- **Purpose**: Validate deck specification before generation
 
-The scraper should extract:
+**Tool 5: `merge_themes`**
+- **Input**: Base theme, override theme
+- **Output**: Merged theme object
+- **Purpose**: Combine multiple theme sources with intelligent merging
 
+### 2. **Theme System**
+
+**Default Theme (Secret AI Branding)**:
 ```python
-ThemeData = {
+default_theme = {
+    "colors": {
+        "primary": "#E3342F",      # Red
+        "secondary": "#FFE9D3",    # Light Peach
+        "accent": "#1CCBD0",       # Cyan
+        "background": "#FFFFFF",   # White
+        "text": "#000000"          # Black
+    },
+    "fonts": {
+        "heading": "Arial",
+        "body": "Arial"
+    },
+    "logo": "default_logo.png"  # Optional Secret AI logo
+}
+```
+
+**Theme Specification Options**:
+
+1. **Default Theme**: Empty theme object `{}` uses Secret AI branding
+2. **Scraped Theme**: Use `scrape_theme` tool to extract from URL
+3. **Direct Colors**: Specify colors directly in DeckSpec
+4. **Merged Theme**: Use `merge_themes` to combine sources
+
+**Scraped Theme Structure**:
+```python
+ScrapedTheme = {
     "colors": {
         "primary": "#RRGGBB",
         "secondary": "#RRGGBB",
         "accent": "#RRGGBB",
-        "background": "#RRGGBB",
-        "text": "#RRGGBB"
+        "background": "#FFFFFF",
+        "text": "#000000"
     },
     "fonts": {
         "heading": "Font Name",
@@ -71,15 +108,10 @@ ThemeData = {
     "images": [
         {
             "url": "https://...",
-            "type": "logo|hero|icon|decorative",
-            "dimensions": (width, height)
+            "type": "logo|background",
+            "alt_text": "Description"
         }
-    ],
-    "layout_style": "modern|corporate|minimal|creative",
-    "spacing": {
-        "margins": int,
-        "line_height": float
-    }
+    ]
 }
 ```
 

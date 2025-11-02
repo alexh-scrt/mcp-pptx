@@ -31,7 +31,10 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["src.mcp_pptx"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.black]
 line-length = 88

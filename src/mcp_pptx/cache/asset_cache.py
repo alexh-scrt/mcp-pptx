@@ -17,7 +17,8 @@ class AssetCache:
     """Manages caching of downloaded assets."""
 
     def __init__(self, cache_dir: Optional[Path] = None, max_age_hours: int = 24):
-        self.cache_dir = cache_dir or Path(".cache/assets")
+        self.cache_dir = Path.home() / '.cache' / 'mcp-pptx' / 'assets'
+#        self.cache_dir = cache_dir or Path(".cache/assets")
         self.max_age_hours = max_age_hours
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 

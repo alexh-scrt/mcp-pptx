@@ -1,8 +1,4 @@
-Perfect! Those are excellent choices. Let me design a detailed architecture based on your preferences.
-
----
-
-# MCP-PPTX Server Architecture v1.0
+# MCP-PPTX Server Architecture v1.1
 
 ## Design Philosophy
 
@@ -10,9 +6,11 @@ Perfect! Those are excellent choices. Let me design a detailed architecture base
 1. **Composable Tools** - Claude orchestrates multiple focused tools
 2. **Lightweight Theme Extraction** - Colors, fonts, logo only
 3. **Claude as Content Creator** - Server is a rendering engine
-4. **Modern Web Support** - Playwright for JS-heavy sites
-5. **Minimal Caching** - Only downloaded assets
+4. **Modern Web Support** - Playwright for JS-heavy sites with fallback
+5. **Minimal Caching** - Only downloaded assets (24-hour TTL)
 6. **Graceful Degradation** - Always produce output + warnings
+7. **Smart Formatting** - Automatic bullet styling and code rendering
+8. **Default Theme** - Secret AI theme when no theme specified
 
 ---
 
@@ -64,21 +62,35 @@ Output:
   {
     "templates": [
       {
-        "name": "default",
-        "path": "themes/default.potx",
-        "layouts": ["TITLE", "TITLE_CONTENT", "TWO_COL", "IMAGE_FOCUS"],
-        "preview": "themes/default_preview.png"  # optional
+        "name": "secret_ai_default",
+        "type": "theme",
+        "path": "themes/default_theme.json",
+        "layouts": ["TITLE", "TITLE_CONTENT", "SECTION", "TWO_COL", "CODE", "IMAGE_FOCUS", "TABLE", "CHART", "BLANK"],
+        "description": "Default Secret AI theme (Red, Cyan, White)",
+        "colors": {
+          "primary": "#E3342F",
+          "secondary": "#FFE9D3",
+          "accent": "#1CCBD0",
+          "background": "#FFFFFF",
+          "text": "#111827"
+        },
+        "fonts": {
+          "heading": "Calibri",
+          "body": "Tahoma"
+        }
       },
       {
-        "name": "nice-actimize",
-        "path": "themes/nice-actimize.potx",
-        "layouts": ["TITLE", "SECTION", "TITLE_CONTENT", "TWO_COL", "TABLE", "CHART"]
+        "name": "custom-template",
+        "type": "potx",
+        "path": "themes/custom-template.potx",
+        "layouts": ["TITLE", "SECTION", "TITLE_CONTENT", "TWO_COL", "TABLE", "CHART"],
+        "description": "PowerPoint template: custom-template"
       }
     ]
   }
 ```
 
-**Purpose:** Let Claude see available templates and their capabilities.
+**Purpose:** Let Claude see available templates and their capabilities. Includes default Secret AI theme as primary option.
 
 ---
 
@@ -166,6 +178,97 @@ Output:
 
 ---
 
+## New Features (v1.1)
+
+### **CODE Slide Layout**
+
+**Purpose:** Display source code with proper monospace formatting and syntax-appropriate styling.
+
+**Features:**
+- Font: Courier New, 20pt
+- Code box background: Light gray (#F5F5F5)
+- Slide background: White (no title bar)
+- Preserves indentation and line breaks
+- Auto-splits long code across multiple slides (>15 lines)
+
+**Usage:**
+```json
+{
+  "layout": "CODE",
+  "title": "Python Example",
+  "content": [
+    {
+      "type": "code",
+      "code": "def hello():\n    print('Hello, World!')",
+      "language": "python",
+      "title": "Optional code block title"
+    }
+  ]
+}
+```
+
+**Auto-Splitting:**
+- Splits code into chunks of 15 lines per slide
+- Configurable via `_split_code_into_chunks(max_lines_per_slide=15)`
+- Maintains proper formatting across slides
+- Automatically creates continuation slides with part numbers
+
+---
+
+### **Smart Bullet Formatting**
+
+**Purpose:** Automatically bold prefixes in bullet points for emphasis.
+
+**Colon Rule** (Priority 1):
+- Detects 1-4 words followed by `:`
+- Makes prefix bold including the colon
+- Example: "Goal: Achieve success" → **Goal:** Achieve success
+
+**Dash Rule** (Priority 2):
+- Detects 1-4 words followed by ` - ` (space-dash-space)
+- Makes prefix bold including the dash
+- Example: "Goal - Achieve success" → **Goal -** Achieve success
+
+**Implementation:**
+```python
+_split_bullet_with_colon(bullet: str) -> tuple[str, str]
+_split_bullet_with_dash(bullet: str) -> tuple[str, str]
+_split_bullet_for_bold(bullet: str) -> tuple[str, str]  # Orchestrator
+```
+
+**Rules:**
+- Colon rule checked first (higher priority)
+- Only applies to prefixes of 1-4 words
+- Both rules require exact patterns (no partial matches)
+- Returns `(None, None)` if no rule matches
+
+---
+
+### **Default Secret AI Theme**
+
+**Purpose:** Provide consistent branding when no theme is specified.
+
+**Colors:**
+- Primary (Red): #E3342F
+- Secondary (Light Peach): #FFE9D3
+- Accent (Cyan): #1CCBD0
+- Background (White): #FFFFFF
+- Text (Dark Gray): #111827
+
+**Layout-Specific Backgrounds:**
+- **TITLE**: Red background (#E3342F)
+- **SECTION**: Rotating colors (Cyan → Red → Peach)
+- **TITLE_CONTENT**: White background with red title bar
+- **CODE**: White background (no title bar)
+- **Other layouts**: White background with red title bar
+
+**Auto-Application:**
+- Automatically loaded from `themes/default_theme.json`
+- Applied when `theme: {}` or no theme specified
+- Can be overridden by scraped theme or template
+
+---
+
 ## Component Architecture
 
 ### **1. Web Scraping Module** (`extraction/theme_extractor.py`)
@@ -209,15 +312,23 @@ FONT_MAPPINGS = {
 
 ```
 Renderer
-├─ renderer.py (orchestration)
+├─ renderer.py (orchestration + default theme loading)
 ├─ layouts.py (layout resolution + fallbacks)
-├─ theme_applicator.py (apply colors, fonts, logos)
+├─ theme_applicator.py (apply colors, fonts, logos, backgrounds)
+│   ├─ apply_slide_background() [TITLE, SECTION, CODE, content slides]
+│   └─ add_title_bar_to_content_slide()
 ├─ content_fillers.py
 │   ├─ _fill_title()
 │   ├─ _fill_bullets()
+│   │   ├─ _split_bullet_for_bold() [smart formatting orchestrator]
+│   │   ├─ _split_bullet_with_colon() [colon rule]
+│   │   └─ _split_bullet_with_dash() [dash rule]
+│   ├─ _fill_code() [NEW - CODE slide rendering]
+│   ├─ _split_code_into_chunks() [NEW - auto-split long code]
 │   ├─ _fill_images()
 │   ├─ _fill_table()
-│   └─ _fill_chart()
+│   ├─ _fill_chart()
+│   └─ _fill_two_column()
 └─ placeholder_detector.py (find & fill placeholders)
 ```
 
@@ -332,13 +443,70 @@ class LogoSpec(BaseModel):
     height: Optional[int] = None
 ```
 
-### **DeckSpec** (Unchanged but referenced)
+### **DeckSpec** (Enhanced)
 ```python
 class DeckSpec(BaseModel):
     title: str
+    subtitle: Optional[str] = None
+    author: Optional[str] = None
+    footer: Optional[FooterSpec] = None
     output: OutputSpec
-    theme: ThemeSpec  # Can reference a .potx OR embed ScrapedTheme
+    theme: ThemeSpec  # Can be empty {}, scraped, direct colors, or template
     slides: List[SlideSpec]
+
+class ThemeSpec(BaseModel):
+    """Theme can be specified in multiple ways"""
+    scraped: Optional[ScrapedTheme] = None
+    template: Optional[str] = None  # Path to .potx
+    colors: Optional[ColorPalette] = None  # Direct specification
+    fonts: Optional[FontPalette] = None
+    logo: Optional[LogoSpec] = None
+
+    # If colors + fonts provided, auto-converts to ScrapedTheme
+    # If empty {}, uses default Secret AI theme
+
+class SlideSpec(BaseModel):
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    layout: LayoutType  # TITLE, TITLE_CONTENT, SECTION, TWO_COL, CODE, etc.
+    content: List[SlideContent] = []
+    speaker_notes: Optional[str] = None
+
+class LayoutType(Enum):
+    TITLE = "TITLE"
+    TITLE_CONTENT = "TITLE_CONTENT"
+    SECTION = "SECTION"
+    TWO_COL = "TWO_COL"
+    IMAGE_FOCUS = "IMAGE_FOCUS"
+    TABLE = "TABLE"
+    CHART = "CHART"
+    CODE = "CODE"  # NEW
+    BLANK = "BLANK"
+
+class ContentType(Enum):
+    TEXT = "text"
+    BULLETS = "bullets"
+    IMAGE = "image"
+    TABLE = "table"
+    CHART = "chart"
+    CODE = "code"  # NEW
+
+class CodeSpec(BaseModel):
+    """NEW: Code block specification"""
+    code: str
+    language: Optional[str] = None  # python, bash, javascript, etc.
+    title: Optional[str] = None
+    line_numbers: bool = False  # Future use
+
+class SlideContent(BaseModel):
+    type: ContentType
+    text: Optional[str] = None
+    bullets: Optional[List[str]] = None
+    image: Optional[ImageSpec] = None
+    table: Optional[TableSpec] = None
+    chart: Optional[ChartSpec] = None
+    code: Optional[Union[CodeSpec, str]] = None  # NEW
+    # ... other fields
 ```
 
 ---
@@ -444,54 +612,181 @@ async def extract_colors_from_page(page):
 - Font mapping logic
 - Layout fallback rules
 - Graceful degradation scenarios
+- **NEW:** Bullet splitting logic (colon and dash rules)
+  - 24 tests covering all edge cases
+  - Located in `tests/test_bullet_logic.py`
 
 ### **Integration Tests:**
 - Full scrape → generate pipeline
 - Invalid URL handling
 - Missing asset handling
+- **NEW:** Default theme application
+- **NEW:** Direct color specification
+- **NEW:** CODE slide rendering
+- **NEW:** Code auto-splitting across slides
+
+### **Test Files** (Located in `tests/` directory):
+```
+tests/
+├── test_models.py              # Data model validation
+├── test_server.py              # MCP server functionality
+├── test_default_theme.py       # Default Secret AI theme
+├── test_direct_colors.py       # Direct color specification
+├── test_all_layouts.py         # All 9 layouts (including CODE)
+├── test_bullet_splitting.py    # Visual bullet formatting test
+├── test_bullet_logic.py        # 24 unit tests for bullet rules
+├── test_code_slides.py         # CODE layout with Python/Bash
+└── test_code_splitting.py      # Auto-split long code
+```
 
 ### **End-to-End Tests:**
 ```python
 def test_full_pipeline():
-    # 1. Scrape theme
+    # 1. Scrape theme (or use default)
     theme = scrape_theme("https://example.com")
-    assert theme.colors.primary is not None
-    
-    # 2. Generate deck
+    # OR use empty theme for default
+    theme = {}
+
+    # 2. Generate deck with CODE slides
     deck = DeckSpec(
         title="Test Deck",
-        theme={"scraped": theme, "template": "themes/default.potx"},
-        slides=[...]
+        theme=theme,
+        slides=[
+            {
+                "layout": "TITLE",
+                "title": "My Presentation"
+            },
+            {
+                "layout": "CODE",
+                "title": "Python Example",
+                "content": [
+                    {
+                        "type": "code",
+                        "code": "def hello():\n    print('Hello')",
+                        "language": "python"
+                    }
+                ]
+            },
+            {
+                "layout": "TITLE_CONTENT",
+                "title": "Key Points",
+                "content": [
+                    "Goal: Achieve success",  # Auto-bold prefix
+                    "Result - Amazing outcome"  # Auto-bold prefix
+                ]
+            }
+        ]
     )
-    
+
     # 3. Validate
     validation = validate_deck(deck)
     assert validation["valid"] is True
-    
+
     # 4. Generate
     result = generate_presentation(deck)
     assert result["ok"] is True
     assert Path(result["output"]).exists()
+    assert result["slides_generated"] == 3
+    assert len(result["warnings"]) == 0
 ```
+
+### **Test Results (v1.1):**
+- ✅ All 24 bullet logic tests passing
+- ✅ Default theme correctly applied
+- ✅ CODE slides render with proper formatting
+- ✅ Code auto-splitting works for 50+ line scripts
+- ✅ Smart bullet formatting applied to colon and dash patterns
+- ✅ All layouts functional (TITLE, TITLE_CONTENT, SECTION, TWO_COL, CODE, etc.)
+- ✅ Generated files valid Microsoft OOXML format
 
 ---
 
 ## Open Questions / Future Enhancements
 
-1. **Should we support theme refinement?**
+### **Implemented in v1.1:**
+- ✅ **CODE slide layout** - Display source code with proper formatting
+- ✅ **Smart bullet formatting** - Auto-bold colon and dash prefixes
+- ✅ **Default theme** - Secret AI branding when no theme specified
+- ✅ **Code auto-splitting** - Break long code across multiple slides
+- ✅ **Direct color specification** - Bypass scraping for known colors
+- ✅ **Fallback extraction** - HTTP fallback when Playwright unavailable
+
+### **Future Considerations:**
+
+1. **Syntax Highlighting for CODE slides**
+   - Integrate pygments or similar for color-coded syntax
+   - Language-specific keyword highlighting
+   - Custom color schemes per language
+
+2. **Line Numbers for CODE slides**
+   - Optional line numbering
+   - Highlight specific line ranges
+   - Support for `CodeSpec.line_numbers` flag
+
+3. **Theme Refinement**
    - Tool: `refine_theme(theme, adjustments)` for Claude to tweak colors
+   - Interactive color adjustment
+   - A/B testing different color palettes
 
-2. **Preview generation?**
+4. **Preview Generation**
    - Tool: `preview_slide(slide_spec, theme)` → PNG thumbnail
+   - Quick visual validation before full generation
+   - Thumbnail gallery for slide selection
 
-3. **Batch generation?**
+5. **Batch Generation**
    - Tool: `generate_multiple(base_spec, variations)` for A/B testing
+   - Generate multiple versions with different themes
+   - Batch export to different formats
 
-4. **Template creation?**
+6. **Template Creation**
    - Tool: `create_template_from_theme(scraped_theme)` → generates .potx
+   - Convert JSON theme to PowerPoint template
+   - Reusable corporate branding
 
-5. **Analytics?**
-   - Track which layouts are most used, common validation warnings
+7. **Advanced Bullet Formatting**
+   - Support for nested bullet levels
+   - Custom bullet styles (numbers, letters, symbols)
+   - Automatic list type detection
+
+8. **Code Features**
+   - Syntax highlighting per language
+   - Code execution output display
+   - Interactive code examples
+   - Diff view for code changes
+
+9. **Analytics & Insights**
+   - Track which layouts are most used
+   - Common validation warnings
+   - Average presentation length
+   - Popular color schemes
+
+10. **Collaboration Features**
+    - Version control for presentations
+    - Collaborative editing
+    - Comment and review system
+
+---
+
+## Version History
+
+### **v1.1** (2025-01-02)
+- Added CODE slide layout with auto-splitting
+- Implemented smart bullet formatting (colon and dash rules)
+- Added default Secret AI theme
+- Enhanced theme specification (direct colors, empty theme support)
+- Improved error handling with HTTP fallback
+- Organized test suite in `tests/` directory
+- Updated documentation (README, CHANGELOG, architecture)
+
+### **v1.0** (Initial Release)
+- Web theme extraction with Playwright
+- PowerPoint generation from DeckSpec
+- Theme application (colors, fonts, logos)
+- Asset caching system
+- Validation engine
+- 5 core tools (scrape_theme, list_templates, validate_deck, generate_presentation, merge_themes)
+- Support for 8 layout types
+- Graceful degradation and error handling
 
 ---
 
